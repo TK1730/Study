@@ -1,0 +1,24 @@
+train:
+  epochs: 10000
+  batch_size: 97
+  accmulation_step: 512
+  test_rate: 0.2
+  temperature: 1.0
+  eps: 1.0e-09
+  optim: Adam
+data:
+  dataset: dataset/jvs_ver3
+  voice: nonpara30w_mean
+  whisp: whisper10
+  input_type: msp
+  frame_lenght: 22
+model:
+  Name: PosteriorEncoder
+  in_channels: 80
+  hidden_channels: 256
+  encoder_dwn_kernel_size: 5
+  dilation_rate: 2
+  n_layers: 16
+loss: CrossEntropyLoss
+optim: Adam
+memo: "accumulation_step\u3092512\u306B\u5909\u66F4"

@@ -1,0 +1,8 @@
+.vscode/
+vits/
+dataset/
+__pycache__/
+*.wav
+*.csv
+*.npy
+*.pth
