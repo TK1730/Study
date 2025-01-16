@@ -13,9 +13,9 @@ from utils import config, functions
 
 # save
 save_path = Path('dataset/jvs_ver3')
-
 # load
 dataset_path = Path('dataset/jvs_ver3')
+
 def make_npy(file_type, save_path):
     for person in dataset_path.iterdir():
         folder = person.joinpath(file_type, 'wav24kHz16bit')
@@ -49,11 +49,14 @@ def make_npy(file_type, save_path):
             if not save_npy.exists():
                 save_npy.mkdir(parents=True)
             save_npy_file = save_npy.joinpath(save_file.stem)
-            np.save(str(save_npy_file) + '_msp.npy', lmsp)
-            np.save(str(save_npy_file) + '_mcp.npy', mcp)
+            # np.save(str(save_npy_file) + '_msp.npy', lmsp)
+            # np.save(str(save_npy_file) + '_mcp.npy', mcp)
+            np.save(str(save_npy_file) + '_cp.npy', cp)
 
-make_npy("nonpara30w_mean", save_path)
-make_npy("whisper10", save_path)
+
+if __name__ == '__main__':
+    make_npy("nonpara30w_mean", save_path)
+    make_npy("whisper10", save_path)
         
 # for person in dataset_path.iterdir():
 #     folder = person.joinpath('whisper10', 'wav24kHz16bit')
