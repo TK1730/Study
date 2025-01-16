@@ -133,6 +133,16 @@ if __name__ == '__main__':
     wav_path = 'dataset/jvs_ver1/jvs001/nonpara30/wav24kHz16bit/BASIC5000_0025.wav'
     wav, sr = librosa.load(wav_path, sr=config.sr)
 
+    # 短時間フーリエ変換
+    D = librosa.stft(wav, n_fft=config.n_fft, hop_length=config.hop_length, win_length=config.win_length, pad_mode='reflect').T
+    # 振幅スペクトル　位相スペクトル　抽出
+    sp, phase = librosa.magphase(D)
+    # メルスペクトルを抽出
+    msp = np.matmul(sp, functions.mel_filter)
+    msp = msp.clip(0, None)
+    print(msp.max())
+    print(msp.min())
+
     mel_scale = mel_filter(
         sr=sr,
         n_fft=config.n_fft,
