@@ -24,10 +24,23 @@ def kl_loss(m_v, logv_v, m_w, logv_w, frame_length=1):
     return torch.mean(kl)
 
 
-def feature_vec(v, eps=1e-9):
+def feature_vec_1(v, eps=1e-9):
+    """
+        特徴量を一次元にしてl2で正規化
+    """
     v = torch.flatten(v, start_dim=1)
     v_l2 = torch.sqrt((v**2).sum(dim=1))
     v = (v.T/(v_l2+eps)).T
+    return v
+
+def featire_vec_2(v, eps=1e-9):
+    """
+        時間方向に平均をとってl2で正規化
+        gloval average pooling
+    """
+    v = torch.mean(v, dim=2)
+    vf_l2 = torch.sqrt((v**2).sum(dim=1))
+    v = (v.T/(vf_l2+eps)).T
     return v
 
 def contrast_loss(v_f, w_f, t=1.0, eps=1e-9, device='cpu'):
@@ -38,8 +51,6 @@ def contrast_loss(v_f, w_f, t=1.0, eps=1e-9, device='cpu'):
 
     return: contrastive loss
     """
-    v_f = feature_vec(v_f, eps)
-    w_f = feature_vec(w_f, eps)
     logits = torch.matmul(v_f, w_f.T) * torch.exp(torch.tensor(t))
     labels = torch.arange(0, v_f.size(0), dtype=torch.long, device=device)
     entropy_loss = (F.cross_entropy(logits, labels) + F.cross_entropy(logits.T, labels)) / 2

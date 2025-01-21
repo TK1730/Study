@@ -303,16 +303,21 @@ class VITS_WN(nn.Module):
                  kernel_size,
                  dilation_rate,
                  n_layers,
+                 layernorm,
                 p_dropout=0):
         super().__init__()
         self.hidden_channels = hidden_channels
         self.kernel_size = kernel_size
         self.dilation_rate = dilation_rate
         self.n_layers = n_layers
+        self.layernorm = layernorm
         self.p_dropout = p_dropout
 
         self.in_layers = torch.nn.ModuleList()
         self.res_skip_layers = torch.nn.ModuleList()
+        if layernorm:
+            self.layernorms = torch.nn.ModuleList()
+
         self.drop = nn.Dropout(p_dropout)
 
         for i in range(n_layers):
@@ -325,6 +330,9 @@ class VITS_WN(nn.Module):
                                        padding=padding)
             in_layer = weight_norm(in_layer, name='weight')
             self.in_layers.append(in_layer)
+            if self.layernorm:
+                in_layer = LayerNorm1d(hidden_channels*2)
+                self.layernorms.append(in_layer)
 
             # 最後の一つは必要ない
             if i < n_layers - 1:
@@ -343,10 +351,12 @@ class VITS_WN(nn.Module):
 
         for i in range(self.n_layers):
             x_in = self.in_layers[i](x)
+            if self.layernorm:
+                x_in = self.layernorms[i](x_in)
+            
             # 活性化関数
             acts = commons.GateActivation(x_in)
             acts = self.drop(acts)
-
             res_skip_acts = self.res_skip_layers[i](acts)
             if i < self.n_layers - 1:
                 res_acts = res_skip_acts[:, :self.hidden_channels, :]

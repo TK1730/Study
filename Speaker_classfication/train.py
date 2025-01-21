@@ -1,29 +1,49 @@
 import sys
-sys.path.append('./')
-import os
+import shutil
 import torch
 import torch.nn as nn
 import torch.functional as F
 import cv2
 import matplotlib.pyplot as plt
+import pickle
 import time
 import numpy as np
 import pandas as pd
 
 from torch.utils.data import DataLoader, random_split
 from dataloader.speaker_classfication import Speaker_classfication_dataset
-from net.models import PosteriorEncoder1d
+from net.models import PosteriorEncoder1d_mish, PosteriorEncoder2ds
 from torch.optim import Adam, AdamW
 from pathlib import Path
+from utils import functions
 
-frame_length = 22
+# setting
+epochs = 3000
+test_rate = 0.2
+batch_size = 64
+shuffle = True
+learning_rate = 1.0e-3
+train_decay = 0.998
+
+dataset_path = 'dataset/jvs_ver3'
+ftype = 'nonpara30w_mean'
+input_type = 'msp'
+
+
 in_channels = 80
 hidden_channels = 256
-inter_channels = 192
 encoder_dwn_kernel_size=5
 dilation_rate = 2
+frame_length = 22
+n_layers = 16
+
+p_dropout = 0.1
+
 # enc
 kernel_size = ((5, 5), (5, 5), (5, 5))
+
+memo = 'speakerclassfication '
+
 # fc
 fc1 = 2048
 fc2 = 97
@@ -43,14 +63,17 @@ class CosineSimilarityLoss(torch.nn.Module):
 # 評価関数
 criterion_crossentropy = nn.CrossEntropyLoss()
 criterion_cossim = CosineSimilarityLoss()
+criterion_mse = nn.MSELoss()
 
 def create_model():
-    return PosteriorEncoder1d(
+    return PosteriorEncoder1d_mish(
         in_channels=in_channels,
         hidden_channels=hidden_channels,
         kernel_size=encoder_dwn_kernel_size,
         dilation_rate=dilation_rate,
-        n_layers=16,
+        frame_length=frame_length,
+        n_layers=n_layers,
+        p_dropout=p_dropout,
     )
 
 def create_model_v2():
@@ -61,14 +84,22 @@ def create_model_v2():
         dilation_rate=dilation_rate,
     )
 
-def create_dir():
-    """
-    学習結果の保存用ディレクトリ作成
-    """
+def make_folder():
+    # 学習結果の保存用ディレクトリ作成
     current_time = time.localtime()
-    file_name = time.strftime("%Y%m%d", current_time)
+    file_name = time.strftime("%Y%m%d_%H%M", current_time)
     save_folder = Path("Speaker_classfication").joinpath(file_name)
-    save_folder.mkdir(parents=True, exist_ok=True)
+    if save_folder.exists():
+        print(f"フォルダが存在します")
+        user_input = input("フォルダを上書きしますか (y/n): ")
+        if user_input == "y":
+            shutil.rmtree(save_folder)
+            save_folder.mkdir(parents=True, exist_ok=True)
+        else:
+            print("プログラムを終了します")
+            sys.exit()
+    else: 
+        save_folder.mkdir(parents=True, exist_ok=True)
     return save_folder
 
 # ログの初期化と保存
@@ -81,21 +112,15 @@ def save_model(model:nn.Module, model_name:str, save_folder:Path):
     model_path = save_folder.joinpath(f'{model_name}_bestloss.pth')
     torch.save(model.state_dict(), model_path)
 
-def create_dataloader(fpath, ftype, input_type, frame_length, test_rate, batch_size, shuffle=True):
-    dataset = Speaker_classfication_dataset(fpath=fpath, ftype=ftype, input_type=input_type, frame_length=frame_length)
-    test_size = int(test_rate * len(dataset))
-    train_size = len(dataset) - test_size
-    train_dataset, test_dataset = random_split(dataset, [train_size, test_size])
-    print(f"total: {len(dataset)} train: {len(train_dataset)} test: {len(test_dataset)}")
-    
-    loader = {
-        'train': DataLoader(train_dataset, batch_size=batch_size, shuffle=shuffle, pin_memory=True),
-        'test': DataLoader(test_dataset, batch_size=batch_size, shuffle=shuffle, pin_memory=True)
-    }
-    return loader
+def save_use_data(data, indices, fpath: Path, fname):
+    npsave = []
+    for i in indices:
+        file_name = data.__getfilename__(i)
+        npsave.append(file_name)
+    np.savetxt(fpath.joinpath(fname + '.csv'), npsave, delimiter=',', fmt='%s')
 
 
-def train_and_validate(model, loader, criterion_crossentropy, optim,
+def train_and_validate(model, loader, criterion_crossentropy, optim, scheduler,
                        epochs, save_folder):
     logs = []
     min_valid_loss = 10000.0
@@ -114,9 +139,10 @@ def train_and_validate(model, loader, criterion_crossentropy, optim,
             
             epoch_corrects = 0
 
-            
-            for j, (v, label) in enumerate(loader[phase]):
-                v, label = v.to(device), label.to(device)
+            for j, (v, label,) in enumerate(loader[phase]):
+                v = v.to(device)
+                label = label.to(device).to(torch.float32)
+
                 # optimizer初期化
                 optim.zero_grad(set_to_none=True)
 
@@ -146,6 +172,9 @@ def train_and_validate(model, loader, criterion_crossentropy, optim,
             else:
                 epoch_val_acc = epoch_corrects.item() / len(loader[phase].dataset)
 
+        # スケジューラー 更新
+        scheduler.step()
+
         # ベストモデルの保存
         if epoch_val_loss < min_valid_loss:
             save_model(model, "best_model", save_folder)
@@ -173,14 +202,68 @@ if __name__ == '__main__':
     # gpu確認
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     print(f'Using device: {device}')
+    
+    # フォルダ作成
+    save_folder = make_folder()
+    
+    # データロード
+    dataset = Speaker_classfication_dataset(fpath=dataset_path, ftype=ftype, input_type=input_type, frame_length=frame_length)
+    test_size = int(test_rate * len(dataset))
+    train_size = len(dataset) - test_size
+    train_dataset, test_dataset = random_split(dataset, [train_size, test_size])
+
+    # データ保存
+    save_use_data(dataset, train_dataset.indices,save_folder, 'train_dataset')
+    save_use_data(dataset, test_dataset.indices, save_folder, 'test_dataset')
+    
+    print(f"total: {len(dataset)} train: {len(train_dataset)} test: {len(test_dataset)}")
+    
+    
+    loader = {
+        'train': DataLoader(train_dataset, batch_size=batch_size, shuffle=shuffle, pin_memory=True),
+        'test': DataLoader(test_dataset, batch_size=batch_size, shuffle=shuffle, pin_memory=True)
+    }
     model = create_model().to(device)
     
-    loader = create_dataloader('dataset/jvs_ver3', 'whisper10', 'msp', frame_length=frame_length, test_rate=0.2, batch_size=128, shuffle=True)
-
     # 最適化関数
-    optim = AdamW(model.parameters())
-    save_folder = create_dir()
+    optim = AdamW(model.parameters(), lr=learning_rate)
+    # パラメータグループに初期学習率を追加
+    for param_group in optim.param_groups: param_group['initial_lr'] = learning_rate
+    # スケジューラー設定
+    scheduler = torch.optim.lr_scheduler.ExponentialLR(optim, gamma=train_decay, last_epoch=epochs-2)
+    # モデルの設定保存
+    learning_setting = {
+        "train":{
+            "epochs": epochs,
+            "batch_size": batch_size,
+            "test_rate": test_rate,
+            "optim": optim.__class__.__name__,
+            "schedulur": "ExponentialLR",
+            "lr": learning_rate,
+            "lr_decacy": train_decay,
+        },
+        "data":{
+            "dataset": dataset_path,
+            "ftype": ftype,
+            "input_type": input_type,
+            "frame_lenght": frame_length,
+        },
+        "model":{
+            "Name": model._get_name(),
+            "in_channels": in_channels,
+            "hidden_channels": hidden_channels,
+            "encoder_dwn_kernel_size": 5,
+            "dilation_rate": dilation_rate,
+            "frame_length": frame_length,
+            "n_layers": n_layers,
+            "p_dropout": p_dropout
+        },
+        "loss": criterion_crossentropy._get_name(),
+        "memo": memo,
+    }
+    functions.Custum(learning_setting, save_folder.joinpath("setting.yml"))
+    print("モデルの設定保存完了")
     # トレーニングと検証
-    train_and_validate(model, loader, criterion_crossentropy, optim, 30000, save_folder)
+    train_and_validate(model, loader, criterion_crossentropy, optim, scheduler, epochs, save_folder)
 
     

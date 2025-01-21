@@ -1,0 +1,24 @@
+train:
+  epochs: 3000
+  batch_size: 64
+  test_rate: 0.2
+  optim: AdamW
+  schedulur: ExponentialLR
+  lr: 0.001
+  lr_decacy: 0.998
+data:
+  dataset: dataset/jvs_ver3
+  ftype: whisper10
+  input_type: msp
+  frame_lenght: 22
+model:
+  Name: PosteriorEncoder1d_mish
+  in_channels: 80
+  hidden_channels: 256
+  encoder_dwn_kernel_size: 5
+  dilation_rate: 2
+  frame_length: 22
+  n_layers: 6
+  p_dropout: 0.1
+loss: CrossEntropyLoss
+memo: 'speakerclassfication '

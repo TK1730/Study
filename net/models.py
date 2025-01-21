@@ -63,24 +63,28 @@ class PosteriorEncoderVAE(nn.Module):
 
         return z, m, logs
 
-class PosteriorEncoder1d(nn.Module):
+class PosteriorEncoder1d_mish(nn.Module):
     def __init__(self,
                  in_channels,
                  hidden_channels,
                  kernel_size,
                  dilation_rate,
-                 n_layers):
+                 frame_length,
+                 n_layers,
+                 p_dropout):
         super().__init__()
         self.in_channels = in_channels
         self.hidden_channels = hidden_channels
         self.kernel_size = kernel_size
         self.dilation_rate = dilation_rate
+        self.frame_length = frame_length
         self.n_layers = n_layers
+        self.p_dropout = p_dropout
         
         self.pre = commons.Conv1d1x1(in_channels, hidden_channels)
-        self.enc = modules.VITS_WN_Mish(hidden_channels, kernel_size, dilation_rate, n_layers)
+        self.enc = modules.VITS_WN_Mish(hidden_channels, kernel_size, dilation_rate, n_layers, p_dropout)
         self.fc_layers = nn.Sequential(
-            nn.Linear(hidden_channels * 22, 4096),
+            nn.Linear(hidden_channels * frame_length, 4096),
             nn.Mish(inplace=True),
             nn.Linear(4096, 97),
         )
@@ -90,6 +94,56 @@ class PosteriorEncoder1d(nn.Module):
         x = self.enc(x)
         x = x.view(x.size(0), -1)
         x = self.fc_layers(x)
+
+        return x
+    
+    def evaluation(self, x):
+        x = self.pre(x)
+        x = self.enc(x)
+        x = x.view(x.size(0), -1)
+
+        return x
+    
+
+class PosteriorEncoder1d_tansig(nn.Module):
+    def __init__(self,
+                 in_channels,
+                 hidden_channels,
+                 kernel_size,
+                 dilation_rate,
+                 frame_length,
+                 n_layers,
+                 layernorm,
+                 p_dropout):
+        super().__init__()
+        self.in_channels = in_channels
+        self.hidden_channels = hidden_channels
+        self.kernel_size = kernel_size
+        self.dilation_rate = dilation_rate
+        self.n_layers = n_layers
+        self.layernorm = layernorm
+        self.p_dropout = p_dropout
+        
+        self.pre = commons.Conv1d1x1(in_channels, hidden_channels)
+        self.enc = modules.VITS_WN(hidden_channels, kernel_size, dilation_rate, n_layers, layernorm, p_dropout)
+        self.fc_layers = nn.Sequential(
+            nn.Linear(hidden_channels * frame_length, 4096),
+            nn.Mish(inplace=True),
+            nn.Linear(4096, 97),
+        )
+    
+    def forward(self, x):
+        x = self.pre(x)
+        x = self.enc(x)
+        x = x.view(x.size(0), -1)
+        x = self.fc_layers(x)
+
+        return x
+    
+    def evaluation(self, x):
+        x = self.pre(x)
+        x = self.enc(x)
+        x = x.view(x.size(0), -1)
 
         return x
 
@@ -352,7 +406,7 @@ class VocalNet(nn.Module):
             encoder_LayerNorm,
             encoder_p_dropout,
             )
-        self.dec = Decoder(
+        self.dec = Decoder2d(
             initial_channel=inter_channels,
             resblock_kernel_sizes=resblock_kernel_sizes,
             resblock_dilation_sizes=resblock_dilation_sizes,

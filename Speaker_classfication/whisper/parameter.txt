@@ -1,6 +1,0 @@
-frame_length = 22
-in_channels = 80
-hidden_channels = 256
-inter_channels = 192
-encoder_dwn_kernel_size=5
-dilation_rate = 2
